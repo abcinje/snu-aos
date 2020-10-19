@@ -1,1 +1,2 @@
 # wswd
+init
