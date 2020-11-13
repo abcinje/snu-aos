@@ -25,3 +25,4 @@ int sys_is_request(struct page *page, int is_write);
 
 ### References
 [1] [문c 블로그, Swap -2- (Swapin & Swapout)](http://jake.dothome.co.kr/swap-2/) - 1, 3, 4번 글도 읽어보면 도움이 될 듯.
+[2] [Linux readahead: less tricks for more](https://www.kernel.org/doc/ols/2007/ols2007v2-pages-273-284.pdf) - 기존 리눅스 프리패칭
