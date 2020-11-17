@@ -16,9 +16,9 @@ cat /cgroup/memory/test_process/memory.limit_in_bytes
 echo 65566 >> /cgroup/memory/test_process/tasks
 ```
 
-* cache miss/hit, completion time 
+* measure cache miss/hit, completion time 
 ```
-perf stat -o ~/wswd/test/matmul_4.15_1.out -e L1-dcache-loads-misses,L1-dcache-loads,LLC-load-misses,LLC-loads,cache-misses,cache-references python3 ~/wswd/test/matmul.py
+perf stat -o file.out -e L1-dcache-loads-misses,L1-dcache-loads,LLC-load-misses,LLC-loads,cache-misses,cache-references python3 matmul.py
 ```
 ### numpy benchmark result
 
