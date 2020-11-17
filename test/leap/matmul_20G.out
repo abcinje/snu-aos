@@ -1,0 +1,14 @@
+# started on Tue Nov 17 12:30:02 2020
+
+
+ Performance counter stats for 'python3 /home/csl/wswd/test/matmul.py':
+
+ 2,515,408,059,118      L1-dcache-loads-misses    #   10.28% of all L1-dcache hits    (66.67%)
+24,463,055,632,991      L1-dcache-loads                                               (66.67%)
+    26,623,226,786      LLC-load-misses           #   29.89% of all LL-cache hits     (66.66%)
+    89,067,934,897      LLC-loads                                                     (66.67%)
+   106,119,183,164      cache-misses              #   12.472 % of all cache refs      (66.67%)
+   850,843,566,739      cache-references                                              (66.67%)
+
+    1360.094581324 seconds time elapsed
+
