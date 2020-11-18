@@ -1,4 +1,4 @@
-# wswd
+# What Should We Do
 
 ### 끄적끄적 :memo:
 - `leap/leap.c` : `sys_is_session_create()` 및 `sys_is_request()` 시스템 콜을 구현.
