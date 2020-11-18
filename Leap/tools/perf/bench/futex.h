@@ -7,6 +7,10 @@
 #ifndef _FUTEX_H
 #define _FUTEX_H
 
+#ifndef SYS_futex
+#define SYS_futex __NR_futex
+#endif
+
 #include <unistd.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
