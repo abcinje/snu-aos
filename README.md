@@ -46,6 +46,23 @@ int sys_is_request(struct page *page, int is_write);
 
 ---
 
+### 적용 위치 고민
+
+1. page --> CPU cache로의 prefetch에 적용
+  - Leap의 trend 기법을 적용하기에 마땅한 위치가 없음
+  - 주소와 범위를 지정하여 prefetch하는 prefetch_range() 함수가 존재하나 현재 사용하는 5.4.59 기준으로 caller가 없고, 이전 history를 봐도 일부 driver 등에서 제한적으로만 사용됨
+  - 그 외의 prefetch() 호출은 각 codeflow에서 다음에 사용할 변수나 객체를 지정하여 prefetch하는 것들로, 현재 목적과는 어울리지 않는 내용임
+
+2. swap --> page로의 prefetch
+  - 기존 Leap 저자들이 수정한 kernel과 유사한 형태로 구현 가능
+
+3. file --> page로의 prefetch
+  - __do_fault() --> filemap_fault() --> ... --> ondemand_readahead() 로 이어지는 흐름에도 적용이 가능할 것으로 보임
+  - ondemand_readahead() 에 sequential read 인지 판단하여 readahead 여부를 결정하는 로직이 있으며 이부분에 Leap 아이디어를 적용해볼 수 있을 것으로 보임
+  - 적용했을 때 이득을 볼수 있을 것인지? 어떻게 적용할 것인지? 확인이 필요
+
+---
+
 ### References
 [1] [문c 블로그, Swap -2- (Swapin & Swapout)](http://jake.dothome.co.kr/swap-2/) - 1, 3, 4번 글도 읽어보면 도움이 될 듯.  
 [2] [Linux readahead: less tricks for more](https://www.kernel.org/doc/ols/2007/ols2007v2-pages-273-284.pdf) - 기존 리눅스 프리패칭
