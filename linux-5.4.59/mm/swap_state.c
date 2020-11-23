@@ -62,6 +62,27 @@ static bool enable_vma_readahead __read_mostly = true;
 #define INC_CACHE_INFO(x)	do { swap_cache_info.x++; } while (0)
 #define ADD_CACHE_INFO(x, nr)	do { swap_cache_info.x += (nr); } while (0)
 
+/***********************************************
+ *  Leap: Custom prefetch
+ ***********************************************/
+
+unsigned long is_custom_prefetch;
+
+unsigned long get_custom_prefetch(void)
+{
+	return is_custom_prefetch;
+}
+EXPORT_SYMBOL(get_custom_prefetch);
+
+void set_custom_prefetch(unsigned long val)
+{
+	is_custom_prefetch = val;
+	printk("Custom prefetch %s\n", is_custom_prefetch ? "enabled" : "disabled");
+}
+EXPORT_SYMBOL(set_custom_prefetch);
+
+/* End of custom prefetch codes */
+
 static struct {
 	unsigned long add_total;
 	unsigned long del_total;
