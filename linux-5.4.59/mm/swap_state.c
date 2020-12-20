@@ -278,6 +278,143 @@ void swap_info_log(void)
 }
 EXPORT_SYMBOL(swap_info_log);
 
+/***********************************************
+ *  Leap: Prefetch buffer
+ ***********************************************/
+
+unsigned long buffer_size = 8000;
+unsigned long is_prefetch_buffer_active;
+
+void activate_prefetch_buffer(unsigned long val)
+{
+	is_prefetch_buffer_active = val;
+	printk("prefetch buffer: %s\n", is_prefetch_buffer_active ? "active" : "inactive" );
+}
+EXPORT_SYMBOL(activate_prefetch_buffer);
+
+unsigned long get_prefetch_buffer_status(void)
+{
+	return is_prefetch_buffer_active;
+}
+EXPORT_SYMBOL(get_prefetch_buffer_status);
+
+struct pref_buffer {
+	atomic_t head;
+	atomic_t tail;
+	atomic_t size;
+	swp_entry_t *offset_list;
+	struct page **page_data;
+	spinlock_t buffer_lock;
+};
+
+static struct pref_buffer prefetch_buffer;
+
+static int get_buffer_head(void)
+{
+	return atomic_read(&prefetch_buffer.head);
+}
+
+static int get_buffer_tail(void)
+{
+	return atomic_read(&prefetch_buffer.tail);
+}
+
+static int get_buffer_size(void)
+{
+	return atomic_read(&prefetch_buffer.size);
+}
+
+static void inc_buffer_head(void)
+{
+	atomic_set(&prefetch_buffer.head, (atomic_read(&prefetch_buffer.head) + 1) % buffer_size);
+}
+
+static void inc_buffer_tail(void)
+{
+	atomic_set(&prefetch_buffer.tail, (atomic_read(&prefetch_buffer.tail) + 1) % buffer_size);
+}
+
+static void inc_buffer_size(void)
+{
+	atomic_inc(&prefetch_buffer.size);
+}
+
+static void dec_buffer_size(void)
+{
+        atomic_dec(&prefetch_buffer.size);
+}
+
+static int is_buffer_full(void)
+{
+	return buffer_size <= atomic_read(&prefetch_buffer.size);
+}
+
+void add_page_to_buffer(swp_entry_t entry, struct page *page)
+{
+	int tail, head, error = 0;
+	swp_entry_t head_entry;
+	struct page *head_page;
+
+	spin_lock_irq(&prefetch_buffer.buffer_lock);
+	inc_buffer_tail();
+	tail = get_buffer_tail();
+
+	while (is_buffer_full() && !error) {
+		head = get_buffer_head();
+		head_entry = prefetch_buffer.offset_list[head];
+		head_page = prefetch_buffer.page_data[head];
+
+		if (!non_swap_entry(head_entry) && head_page) {
+			if (PageSwapCache(head_page) && !page_mapped(head_page) && trylock_page(head_page)) {
+				test_clear_page_writeback(head_page);
+				delete_from_swap_cache(head_page);
+				SetPageDirty(head_page);
+				unlock_page(head_page);
+				error = 1;
+			} else if (page_mapcount(head_page) == 1 && trylock_page(head_page)) {
+				try_to_free_swap(head_page);
+				unlock_page(head_page);
+                                error = 1;
+			} else {
+				inc_buffer_tail();
+				tail = get_buffer_tail();
+			}
+		} else {
+			error = 1;
+		}
+
+		inc_buffer_head();
+	}
+
+	prefetch_buffer.offset_list[tail] = entry;
+	prefetch_buffer.page_data[tail] = page;
+	inc_buffer_size();
+	spin_unlock_irq(&prefetch_buffer.buffer_lock);
+}
+EXPORT_SYMBOL(add_page_to_buffer);
+
+void prefetch_buffer_init(unsigned long _size)
+{
+	printk("%s: initiating prefetch buffer with size %ld!\n",__func__, _size);
+
+	if (!_size || _size <= 0) {
+		printk("%s: invalid buffer size\n",__func__);
+		return;
+	}
+
+	buffer_size = _size;
+	prefetch_buffer.offset_list = (swp_entry_t *) kzalloc(buffer_size * sizeof(swp_entry_t), GFP_KERNEL);
+	prefetch_buffer.page_data = (struct page **) kzalloc(buffer_size * sizeof(struct page *), GFP_KERNEL);
+	atomic_set(&prefetch_buffer.head, 0);
+	atomic_set(&prefetch_buffer.tail, 0);
+	atomic_set(&prefetch_buffer.size, 0);
+
+	printk("%s: prefetch buffer initiated with size: %d, head at: %d, tail at: %d\n", __func__, get_buffer_size(), get_buffer_head(), get_buffer_tail());
+}
+EXPORT_SYMBOL(prefetch_buffer_init);
+
+/* End of prefetch buffer codes */
+
 /*
  * add_to_swap_cache resembles add_to_page_cache_locked on swapper_space,
  * but sets SwapCache flag and private instead of mapping and index.
@@ -490,6 +627,9 @@ struct page *lookup_swap_cache(swp_entry_t entry, struct vm_area_struct *vma,
 	page = find_get_page(swap_address_space(entry), swp_offset(entry));
 	put_swap_device(si);
 
+	if (get_custom_prefetch())
+		log_swap_trend(swp_offset(entry));
+
 	INC_CACHE_INFO(find_total);
 	if (page) {
 		bool vma_ra = swap_use_vma_readahead();
@@ -519,8 +659,11 @@ struct page *lookup_swap_cache(swp_entry_t entry, struct vm_area_struct *vma,
 
 		if (readahead) {
 			count_vm_event(SWAP_RA_HIT);
-			if (!vma || !vma_ra)
+			if (!vma || !vma_ra) {
 				atomic_inc(&swapin_readahead_hits);
+				if (get_custom_prefetch())
+					atomic_inc(&my_swapin_readahead_hits);
+			}
 		}
 	}
 
@@ -624,8 +767,11 @@ struct page *read_swap_cache_async(swp_entry_t entry, gfp_t gfp_mask,
 	struct page *retpage = __read_swap_cache_async(entry, gfp_mask,
 			vma, addr, &page_was_allocated);
 
-	if (page_was_allocated)
+	if (page_was_allocated) {
+		if (get_prefetch_buffer_status())
+			add_page_to_buffer(entry, retpage);
 		swap_readpage(retpage, do_poll);
+	}
 
 	return retpage;
 }
@@ -644,7 +790,7 @@ static unsigned int __swapin_nr_pages(unsigned long prev_offset,
 	 * what the "+ 2" means, it just happens to work well, that's all.
 	 */
 	pages = hits + 2;
-	if (pages == 2) {
+	if (pages == 2 && !get_custom_prefetch()) {
 		/*
 		 * We can have no readahead hits to judge by: but must not get
 		 * stuck here forever, so check for an adjacent offset instead
@@ -723,6 +869,40 @@ struct page *swap_cluster_readahead(swp_entry_t entry, gfp_t gfp_mask,
 	unsigned long addr = vmf->address;
 
 	mask = swapin_nr_pages(offset) - 1;
+
+	atomic_inc(&swapin_readahead_entry);
+
+	if (get_custom_prefetch()) {
+		int has_trend = 0, depth, major_count;
+		long major_delta;
+
+		has_trend = find_trend(&depth, &major_delta, &major_count);
+		if (has_trend) {
+			int count = 0;
+
+			atomic_inc(&trend_found);
+			start_offset = offset;
+
+			for (offset = start_offset; count <= mask; offset+= major_delta, count++) {
+				page = read_swap_cache_async(swp_entry(swp_type(entry), offset),
+                                                gfp_mask, vma, addr);
+				if (!page)
+					continue;
+
+				if (offset != entry_offset)
+					SetPageReadahead(page);
+
+				page_cache_release(page);
+			}
+
+			lru_add_drain();
+			goto skip;
+		} else {
+			goto usual;
+		}
+	}
+
+usual:
 	if (!mask)
 		goto skip;
 
