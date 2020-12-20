@@ -62,12 +62,174 @@ static bool enable_vma_readahead __read_mostly = true;
 #define INC_CACHE_INFO(x)	do { swap_cache_info.x++; } while (0)
 #define ADD_CACHE_INFO(x, nr)	do { swap_cache_info.x += (nr); } while (0)
 
+/***********************************************
+ *  Leap: Custom prefetch
+ ***********************************************/
+
+unsigned long is_custom_prefetch;
+
+unsigned long get_custom_prefetch(void)
+{
+	return is_custom_prefetch;
+}
+EXPORT_SYMBOL(get_custom_prefetch);
+
+void set_custom_prefetch(unsigned long val)
+{
+	is_custom_prefetch = val;
+	printk("Custom prefetch %s\n", is_custom_prefetch ? "enabled" : "disabled");
+}
+EXPORT_SYMBOL(set_custom_prefetch);
+
+/* End of custom prefetch codes */
+
 static struct {
 	unsigned long add_total;
 	unsigned long del_total;
 	unsigned long find_success;
 	unsigned long find_total;
 } swap_cache_info;
+
+/***********************************************
+ *  Leap: Trend detection
+ ***********************************************/
+
+static atomic_t my_swapin_readahead_hits	= ATOMIC_INIT(0);
+static atomic_t swapin_readahead_entry		= ATOMIC_INIT(0);
+static atomic_t trend_found			= ATOMIC_INIT(0);
+
+struct swap_entry {
+	long delta;
+	unsigned long entry;
+};
+
+struct swap_trend {
+	atomic_t head;
+	atomic_t size;
+	atomic_t max_size;
+	struct swap_entry *history;
+};
+
+static struct swap_trend trend_history;
+
+static int get_prev_index(int index)
+{
+	return (index > 0) ? (index - 1) : (atomic_read(&trend_history.max_size) - 1);
+}
+
+static void inc_head(void)
+{
+	int current_head = atomic_read(&trend_history.head);
+	int max_size = atomic_read(&trend_history.max_size);
+
+	atomic_set(&trend_history.head, (current_head + 1) % max_size);
+}
+
+static void inc_size(void)
+{
+	int current_size = atomic_read(&trend_history.size);
+	int max_size = atomic_read(&trend_history.max_size);
+
+	if (current_size < max_size)
+		atomic_inc(&trend_history.size);
+}
+
+static void log_swap_trend(unsigned long entry)
+{
+	long offset_delta;
+	int prev_index;
+	struct swap_entry se;
+
+	if (atomic_read(&trend_history.size)) {
+		prev_index = get_prev_index(atomic_read(&trend_history.head));
+		offset_delta = entry - trend_history.history[prev_index].entry;
+
+		se.delta = offset_delta;
+		se.entry = entry;
+	} else {
+		se.delta = 0;
+		se.entry = entry;
+	}
+
+	trend_history.history[atomic_read(&trend_history.head)] = se;
+	inc_head();
+	inc_size();
+}
+
+static int find_trend_in_region(int size, long *major_delta, int *major_count)
+{
+	int maj_index = get_prev_index(atomic_read(&trend_history.head));
+	int count, i, j;
+	long candidate;
+
+	for (i = get_prev_index(maj_index), j = 1, count = 1; j < size; i = get_prev_index(i), j++) {
+		if (trend_history.history[maj_index].delta == trend_history.history[i].delta) {
+			count++;
+		} else {
+			count--;
+		}
+
+		if (count == 0) {
+			maj_index = i;
+			count = 1;
+		}
+	}
+
+	candidate = trend_history.history[maj_index].delta;
+	for (i = get_prev_index(atomic_read(&trend_history.head)), j = 0, count = 0; j < size; i = get_prev_index(i), j++)
+		if (trend_history.history[i].delta == candidate)
+			count++;
+
+	*major_delta = candidate;
+	*major_count = count;
+
+	return count > (size / 2);
+}
+
+static int find_trend(int *depth, long *major_delta, int *major_count)
+{
+	int has_trend = 0;
+	int size = (int)atomic_read(&trend_history.max_size) / 4;
+	int max_size = size * 4;
+
+	while (has_trend == 0 && size <= max_size) {
+		has_trend = find_trend_in_region(size, major_delta, major_count);
+		size *= 2;
+	}
+
+	*depth = size;
+
+	return has_trend;
+}
+
+static void init_stat(void)
+{
+	swap_cache_info.add_total = 0;
+	swap_cache_info.del_total = 0;
+	swap_cache_info.find_success = 0;
+	swap_cache_info.find_total = 0;
+
+	atomic_set(&my_swapin_readahead_hits, 0);
+	atomic_set(&swapin_readahead_entry, 0);
+	atomic_set(&trend_found, 0);
+}
+
+void init_swap_trend(int size)
+{
+	trend_history.history = (struct swap_entry *)kzalloc(size * sizeof(struct swap_entry), GFP_KERNEL);
+	atomic_set(&trend_history.head, 0);
+	atomic_set(&trend_history.size, 0);
+	atomic_set(&trend_history.max_size, size);
+
+	init_stat();
+	printk("Swap trend history initiated (size, head, current_size) == (%d, %d, %d)\n",
+			atomic_read(&trend_history.max_size),
+			atomic_read(&trend_history.head),
+			atomic_read(&trend_history.size));
+}
+EXPORT_SYMBOL(init_swap_trend);
+
+/* End of trend detection codes */
 
 unsigned long total_swapcache_pages(void)
 {

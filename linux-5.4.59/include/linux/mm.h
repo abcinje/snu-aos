@@ -28,6 +28,11 @@
 #include <linux/overflow.h>
 #include <linux/sizes.h>
 
+/* Leap: Function prototypes */
+unsigned long get_custom_prefetch(void);
+void set_custom_prefetch(unsigned long val);
+void init_swap_trend(int size);
+
 struct mempolicy;
 struct anon_vma;
 struct anon_vma_chain;
