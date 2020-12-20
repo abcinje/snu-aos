@@ -885,14 +885,14 @@ struct page *swap_cluster_readahead(swp_entry_t entry, gfp_t gfp_mask,
 
 			for (offset = start_offset; count <= mask; offset+= major_delta, count++) {
 				page = read_swap_cache_async(swp_entry(swp_type(entry), offset),
-                                                gfp_mask, vma, addr);
+                                                gfp_mask, vma, addr, &page_allocated);
 				if (!page)
 					continue;
 
 				if (offset != entry_offset)
 					SetPageReadahead(page);
 
-				page_cache_release(page);
+				put_page(page);
 			}
 
 			lru_add_drain();
