@@ -32,6 +32,7 @@
 unsigned long get_custom_prefetch(void);
 void set_custom_prefetch(unsigned long val);
 void init_swap_trend(int size);
+void swap_info_log(void);
 
 struct mempolicy;
 struct anon_vma;

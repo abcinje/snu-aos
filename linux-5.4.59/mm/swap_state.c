@@ -270,6 +270,14 @@ void show_swap_cache_info(void)
 	printk("Total swap = %lukB\n", total_swap_pages << (PAGE_SHIFT - 10));
 }
 
+void swap_info_log(void)
+{
+	show_swap_cache_info();
+	printk("\n\nmy_swapin_readahead_hits: %d, trend_found: %d, swapin_readahead_entry: %d\n",
+			atomic_read(&my_swapin_readahead_hits), atomic_read(&trend_found), atomic_read(&swapin_readahead_entry));
+}
+EXPORT_SYMBOL(swap_info_log);
+
 /*
  * add_to_swap_cache resembles add_to_page_cache_locked on swapper_space,
  * but sets SwapCache flag and private instead of mapping and index.
